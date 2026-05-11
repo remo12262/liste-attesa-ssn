@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor Liste di Attesa SSN — LIVE</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --blu:#003087; --verde:#00875a; --rosso:#cf1919; --arancio:#e07b00;
+    --grigio:#f4f6f9; --bordo:#dce3ee; --testo:#1a1a2e; --bianco:#fff;
+    --ombra:0 2px 12px rgba(0,48,135,0.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;}
+  body{background:var(--grigio);color:var(--testo);}
+
+  header{
+    background:linear-gradient(135deg,var(--blu) 0%,#0050b3 100%);
+    color:white;padding:16px 28px;display:flex;align-items:center;
+    justify-content:space-between;flex-wrap:wrap;gap:10px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.18);
+  }
+  header h1{font-size:1.2rem;font-weight:700;}
+  header .sub{font-size:0.76rem;opacity:0.85;margin-top:2px;}
+  .live-badge{
+    display:flex;align-items:center;gap:8px;
+    background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+    border-radius:20px;padding:6px 14px;font-size:0.78rem;font-weight:600;
+  }
+  .pulse{width:10px;height:10px;border-radius:50%;background:#4ade80;
+    animation:pulse 1.5s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.5;transform:scale(1.3);}}
+
+  .config-bar{
+    background:white;border-bottom:2px solid var(--bordo);
+    padding:12px 28px;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;
+  }
+  .config-bar label{font-size:0.75rem;color:#555;font-weight:600;}
+  .config-bar input,.config-bar select{
+    border:1.5px solid var(--bordo);border-radius:7px;padding:7px 10px;
+    font-size:0.82rem;background:var(--grigio);margin-top:3px;display:block;
+    min-width:200px;
+  }
+  .btn{background:var(--blu);color:white;border:none;border-radius:8px;
+    padding:8px 16px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background 0.2s;}
+  .btn:hover{background:#0050b3;}
+  .btn.verde{background:var(--verde);}
+  .btn.verde:hover{background:#006644;}
+  .btn.small{padding:5px 12px;font-size:0.75rem;}
+
+  main{padding:20px 28px;max-width:1400px;margin:0 auto;}
+
+  /* Status bar */
+  #statusBar{
+    padding:10px 16px;border-radius:10px;margin-bottom:16px;
+    font-size:0.82rem;display:flex;align-items:center;gap:10px;
+  }
+  #statusBar.loading{background:#e8f0ff;color:#003087;border:1px solid #b3c6f5;}
+  #statusBar.ok{background:#d4f5e4;color:#005c2a;border:1px solid #8dd4af;}
+  #statusBar.error{background:#fff0f0;color:#800000;border:1px solid #f5b3b3;}
+  #statusBar.warning{background:#fffbec;color:#7a4a00;border:1px solid #f5d87a;}
+
+  /* KPI */
+  .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px;}
+  .kpi{background:white;border-radius:12px;padding:18px 20px;box-shadow:var(--ombra);border-left:5px solid var(--blu);}
+  .kpi.ok{border-left-color:var(--verde);}
+  .kpi.warning{border-left-color:var(--arancio);}
+  .kpi.critical{border-left-color:var(--rosso);}
+  .kpi .label{font-size:0.7rem;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;}
+  .kpi .value{font-size:1.9rem;font-weight:800;line-height:1.1;margin-top:4px;}
+  .kpi.ok .value{color:var(--verde);}
+  .kpi.warning .value{color:var(--arancio);}
+  .kpi.critical .value{color:var(--rosso);}
+  .kpi .sub{font-size:0.72rem;color:#999;margin-top:2px;}
+
+  /* Grid */
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;}
+  @media(max-width:900px){.grid-2{grid-template-columns:1fr;}}
+  .card{background:white;border-radius:12px;padding:20px;box-shadow:var(--ombra);border:1px solid var(--bordo);}
+  .card h3{font-size:0.9rem;font-weight:700;color:var(--blu);margin-bottom:14px;display:flex;align-items:center;gap:6px;}
+
+  /* Tabella */
+  .table-wrap{overflow-x:auto;max-height:380px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:0.8rem;}
+  th{background:var(--blu);color:white;padding:9px 11px;text-align:left;font-weight:600;
+    font-size:0.74rem;position:sticky;top:0;z-index:1;}
+  td{padding:8px 11px;border-bottom:1px solid var(--bordo);}
+  tr:hover td{background:#f0f4ff;}
+  .pill{display:inline-block;border-radius:20px;padding:2px 10px;font-size:0.7rem;font-weight:700;text-transform:uppercase;}
+  .pill.ok{background:#d4f5e4;color:#007a3d;}
+  .pill.warning{background:#fff3cc;color:#a05a00;}
+  .pill.critical{background:#ffe0e0;color:#b00000;}
+  .pill.U{background:#ffeaea;color:#900;}
+  .pill.B{background:#fff3d4;color:#7a4a00;}
+  .pill.D{background:#d4eaff;color:#003d99;}
+  .pill.P{background:#e8f5e4;color:#1a6600;}
+
+  /* Progress */
+  .progress-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .progress-label{font-size:0.76rem;width:140px;flex-shrink:0;}
+  .progress-bar{flex:1;background:#e8ecf5;border-radius:6px;height:11px;overflow:hidden;}
+  .progress-fill{height:100%;border-radius:6px;transition:width 0.6s;}
+  .progress-val{font-size:0.76rem;font-weight:700;width:40px;text-align:right;}
+
+  .tabs{display:flex;gap:3px;margin-bottom:18px;flex-wrap:wrap;}
+  .tab{padding:7px 16px;border-radius:7px 7px 0 0;font-size:0.8rem;font-weight:600;
+    cursor:pointer;border:1.5px solid var(--bordo);border-bottom:none;
+    background:var(--grigio);color:#555;transition:all 0.2s;}
+  .tab.active{background:white;color:var(--blu);}
+  .tab-content{display:none;}
+  .tab-content.active{display:block;}
+
+  canvas{max-height:260px;}
+  .footer{text-align:center;font-size:0.7rem;color:#aaa;padding:16px;}
+  .fonte-tag{font-size:0.68rem;color:#aaa;float:right;}
+  .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,48,135,0.2);
+    border-top-color:var(--blu);border-radius:50%;animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* Istruzioni setup */
+  .setup-box{background:#fffbec;border:2px dashed var(--arancio);border-radius:12px;
+    padding:20px;margin-bottom:20px;}
+  .setup-box h3{color:var(--arancio);margin-bottom:10px;}
+  .setup-box ol{padding-left:20px;font-size:0.83rem;line-height:2;}
+  .setup-box code{background:#f0e8d0;padding:2px 6px;border-radius:4px;font-size:0.78rem;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🏥 Monitor Liste di Attesa SSN — LIVE</h1>
+    <div class="sub">AGENAS PNLA + Portali Open Data Regionali · Legge 107/2024 · PNGLA 2025-2027</div>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <div class="live-badge"><div class="pulse"></div> <span id="liveStatus">In attesa dati...</span></div>
+    <div class="live-badge" style="font-size:0.7rem;" id="lastUpdateBadge">—</div>
+  </div>
+</header>
+
+<!-- BARRA CONFIGURAZIONE SORGENTE DATI -->
+<div class="config-bar">
+  <div>
+    <label>🔗 Sorgente dati</label>
+    <select id="selSorgente" onchange="onSorgenteChange()">
+      <option value="gsheets">Google Sheets (live automatico)</option>
+      <option value="csv_url">CSV da URL pubblico</option>
+      <option value="csv_file">Carica CSV manuale</option>
+      <option value="github">GitHub Pages (CSV da repo)</option>
+    </select>
+  </div>
+  <div id="configGsheets">
+    <label>🔑 Google Sheets ID</label>
+    <input type="text" id="gsheetsId" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+      value="" style="min-width:380px;">
+  </div>
+  <div id="configCsvUrl" style="display:none;">
+    <label>🌐 URL file CSV</label>
+    <input type="text" id="csvUrl" placeholder="https://tuosito.com/latest.csv" style="min-width:320px;">
+  </div>
+  <div id="configFile" style="display:none;">
+    <label>📂 File CSV locale</label>
+    <input type="file" id="csvFile" accept=".csv" onchange="loadLocalCSV(event)">
+  </div>
+  <div id="configGithub" style="display:none;">
+    <label>🐙 GitHub repo (user/repo)</label>
+    <input type="text" id="githubRepo" placeholder="tuousername/liste-attesa-ssn" style="min-width:280px;">
+  </div>
+  <div style="display:flex;gap:8px;align-items:flex-end;">
+    <button class="btn verde" onclick="caricaDati()">🔄 Aggiorna ora</button>
+    <select id="selRegione" onchange="filterData()">
+      <option value="ALL">Tutte le Regioni</option>
+    </select>
+    <select id="selPrestazione" onchange="filterData()">
+      <option value="ALL">Tutte le Prestazioni</option>
+    </select>
+  </div>
+</div>
+
+<main>
+
+  <!-- STATUS BAR -->
+  <div id="statusBar" class="loading">
+    <div class="spinner"></div>
+    <span id="statusMsg">Seleziona una sorgente dati e clicca "Aggiorna ora"</span>
+  </div>
+
+  <!-- SETUP GUIDE (mostrata inizialmente) -->
+  <div class="setup-box" id="setupBox">
+    <h3>⚙️ Come configurare la sorgente dati live</h3>
+    <ol>
+      <li>Esegui lo scraper: <code>cd scraper && python scraper_agenas.py</code></li>
+      <li>Lo scraper carica i dati su Google Sheets automaticamente</li>
+      <li>Copia l'<strong>ID del tuo Google Sheet</strong> (dalla URL del foglio)</li>
+      <li>Incollalo nel campo "Google Sheets ID" qui sopra</li>
+      <li>Clicca <strong>Aggiorna ora</strong> — la dashboard legge i dati in tempo reale</li>
+    </ol>
+    <div style="margin-top:10px;font-size:0.78rem;color:#7a4a00;">
+      💡 <strong>Alternativa rapida:</strong> scarica il CSV dal portale AGENAS 
+      (<a href="https://www.portaletrasparenzaservizisanitari.it/pnla/" target="_blank">portaletrasparenzaservizisanitari.it/pnla</a>)
+      ed usalo con "Carica CSV manuale" per avere dati reali subito.
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <div class="kpi-row" id="kpiRow" style="display:none;">
+    <div class="kpi critical"><div class="label">Prestazioni fuori soglia</div><div class="value" id="kpiCritici">—</div><div class="sub">Superano limiti PNGLA</div></div>
+    <div class="kpi warning"><div class="label">% Nei tempi (media)</div><div class="value" id="kpiRispetto">—</div><div class="sub">Tutte le classi</div></div>
+    <div class="kpi ok"><div class="label">Volume prestazioni</div><div class="value" id="kpiVolume">—</div><div class="sub">Periodo selezionato</div></div>
+    <div class="kpi"><div class="label">Tempo medio attesa</div><div class="value" id="kpiTempo">—</div><div class="sub">Giorni (media)</div></div>
+    <div class="kpi"><div class="label">Record totali</div><div class="value" id="kpiRecord">—</div><div class="sub">Nel dataset</div></div>
+    <div class="kpi"><div class="label">Ultima fonte</div><div class="value" style="font-size:0.9rem;" id="kpiFonte">—</div><div class="sub">Origine dati</div></div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs" id="tabsRow" style="display:none;">
+    <div class="tab active" onclick="showTab('overview')">📊 Panoramica</div>
+    <div class="tab" onclick="showTab('tabella')">📋 Dati Dettagliati</div>
+    <div class="tab" onclick="showTab('regioni')">🗺️ Per Regione</div>
+    <div class="tab" onclick="showTab('report')">📄 Report</div>
+  </div>
+
+  <!-- TAB OVERVIEW -->
+  <div id="tab-overview" class="tab-content active">
+    <div class="grid-2">
+      <div class="card">
+        <h3>🎯 Rispetto soglie per Classe di Priorità</h3>
+        <canvas id="chartPriority"></canvas>
+      </div>
+      <div class="card">
+        <h3>⚠️ Top 10 Prestazioni più critiche</h3>
+        <canvas id="chartCritiche"></canvas>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>🏥 Rispetto soglie per Regione</h3>
+        <div id="progressRegioni"></div>
+      </div>
+      <div class="card">
+        <h3>📊 Distribuzione stati</h3>
+        <canvas id="chartStati"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB TABELLA -->
+  <div id="tab-tabella" class="tab-content">
+    <div class="card">
+      <h3>📋 Dati completi <span class="fonte-tag" id="fonteTag"></span></h3>
+      <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+        <input type="text" id="searchFilter" placeholder="🔍 Cerca prestazione, regione..."
+          oninput="filterTable()" style="padding:7px 12px;border:1.5px solid var(--bordo);border-radius:7px;font-size:0.82rem;min-width:250px;">
+        <select id="filterStato" onchange="filterTable()" style="padding:7px 12px;border:1.5px solid var(--bordo);border-radius:7px;font-size:0.82rem;">
+          <option value="ALL">Tutti gli stati</option>
+          <option value="CRITICO">🔴 Solo Critici</option>
+          <option value="ATTENZIONE">🟡 Solo Attenzione</option>
+          <option value="OK">🟢 Solo OK</option>
+        </select>
+        <button class="btn small verde" onclick="esportaCSV()">⬇️ Esporta CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th onclick="sortTable('regione')" style="cursor:pointer;">Regione ↕</th>
+              <th onclick="sortTable('prestazione')" style="cursor:pointer;">Prestazione ↕</th>
+              <th>Classe</th>
+              <th onclick="sortTable('tempo_medio_gg')" style="cursor:pointer;">Tempo Medio ↕</th>
+              <th>Soglia</th>
+              <th>Sforamento</th>
+              <th onclick="sortTable('perc_nei_tempi')" style="cursor:pointer;">% nei tempi ↕</th>
+              <th>Volume</th>
+              <th>Stato</th>
+              <th>Fonte</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyDati"></tbody>
+        </table>
+      </div>
+      <div id="tableInfo" style="font-size:0.72rem;color:#888;margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <!-- TAB REGIONI -->
+  <div id="tab-regioni" class="tab-content">
+    <div class="card">
+      <h3>🗺️ Confronto Regionale</h3>
+      <canvas id="chartRegioni" style="max-height:320px;"></canvas>
+    </div>
+  </div>
+
+  <!-- TAB REPORT -->
+  <div id="tab-report" class="tab-content">
+    <div class="card">
+      <h3>📄 Report automatico — pronto per Regione/Ministero</h3>
+      <div id="reportContent"></div>
+      <button class="btn verde" style="margin-top:16px;width:100%;" onclick="stampaReport()">🖨️ Stampa / Salva PDF</button>
+    </div>
+  </div>
+
+</main>
+
+<div class="footer">
+  Monitor Liste di Attesa SSN · AGENAS PNLA · Legge 107/2024 · 
+  <a href="https://www.portaletrasparenzaservizisanitari.it/pnla/" target="_blank">portaletrasparenzaservizisanitari.it</a>
+</div>
+
+<script>
+// ============================================================
+// CONFIGURAZIONE
+// ============================================================
+const SOGLIE = {U:3, B:10, D:30, P:120};
+const BENCHMARK_MIN = {U:90, B:80, D:75, P:70};
+let allData = [];
+let filteredData = [];
+let sortKey = null;
+let sortAsc = true;
+let charts = {};
+
+// ============================================================
+// SORGENTE DATI
+// ============================================================
+function onSorgenteChange() {
+  const s = document.getElementById('selSorgente').value;
+  document.getElementById('configGsheets').style.display = s==='gsheets' ? 'block' : 'none';
+  document.getElementById('configCsvUrl').style.display = s==='csv_url' ? 'block' : 'none';
+  document.getElementById('configFile').style.display = s==='csv_file' ? 'block' : 'none';
+  document.getElementById('configGithub').style.display = s==='github' ? 'block' : 'none';
+}
+
+async function caricaDati() {
+  const s = document.getElementById('selSorgente').value;
+  setStatus('loading', '⏳ Caricamento dati in corso...');
+  
+  try {
+    let csv = null;
+    
+    if (s === 'gsheets') {
+      csv = await fetchGoogleSheets();
+    } else if (s === 'csv_url') {
+      csv = await fetchCsvUrl(document.getElementById('csvUrl').value);
+    } else if (s === 'github') {
+      csv = await fetchGithubCsv(document.getElementById('githubRepo').value);
+    } else {
+      setStatus('warning', '⚠️ Usa il campo "Carica CSV manuale" per caricare un file locale.');
+      return;
+    }
+    
+    if (csv) processCSV(csv, s);
+  } catch(e) {
+    setStatus('error', '❌ Errore caricamento: ' + e.message);
+  }
+}
+
+// Google Sheets → CSV pubblico
+// Il foglio deve essere condiviso come "chiunque con il link può visualizzare"
+async function fetchGoogleSheets() {
+  const id = document.getElementById('gsheetsId').value.trim();
+  if (!id) throw new Error('Inserisci l\'ID del Google Sheet');
+  
+  // URL per esportare Google Sheet come CSV
+  const url = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&sheet=dati_live`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Errore HTTP ${r.status}. Verifica che il foglio sia pubblico.`);
+  return await r.text();
+}
+
+async function fetchCsvUrl(url) {
+  if (!url) throw new Error('Inserisci l\'URL del file CSV');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Errore HTTP ${r.status}`);
+  return await r.text();
+}
+
+async function fetchGithubCsv(repo) {
+  if (!repo) throw new Error('Inserisci il nome del repository (user/repo)');
+  const url = `https://raw.githubusercontent.com/${repo}/main/docs/latest.csv`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`File non trovato nel repo. URL: ${url}`);
+  return await r.text();
+}
+
+function loadLocalCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  setStatus('loading', '⏳ Caricamento file CSV...');
+  const reader = new FileReader();
+  reader.onload = e => processCSV(e.target.result, 'CSV locale: ' + file.name);
+  reader.readAsText(file, 'UTF-8');
+}
+
+// ============================================================
+// PROCESSAMENTO CSV
+// ============================================================
+function processCSV(csvText, fonte) {
+  Papa.parse(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    complete: (res) => {
+      if (!res.data.length) {
+        setStatus('error', '❌ CSV vuoto o non leggibile.');
+        return;
+      }
+      
+      allData = res.data.map(r => normalizzaRiga(r)).filter(r => r !== null);
+      
+      if (!allData.length) {
+        setStatus('error', '❌ Nessun dato valido trovato nel CSV.');
+        return;
+      }
+      
+      // Popola filtri
+      popolaFiltri();
+      filterData();
+      
+      // Mostra UI
+      document.getElementById('setupBox').style.display = 'none';
+      document.getElementById('kpiRow').style.display = 'grid';
+      document.getElementById('tabsRow').style.display = 'flex';
+      document.getElementById('fonteTag').textContent = fonte;
+      
+      const ts = new Date().toLocaleString('it-IT');
+      document.getElementById('lastUpdateBadge').textContent = `Aggiornato: ${ts}`;
+      document.getElementById('liveStatus').textContent = 'Dati aggiornati';
+      setStatus('ok', `✅ Caricati ${allData.length} record da ${fonte} — ${ts}`);
+    },
+    error: (e) => setStatus('error', '❌ Errore parsing CSV: ' + e.message)
+  });
+}
+
+function normalizzaRiga(r) {
+  // Mapping flessibile colonne (gestisce varianti da AGENAS e da portali regionali)
+  const get = (...keys) => {
+    for (const k of keys) {
+      const found = Object.keys(r).find(col => col.toLowerCase() === k.toLowerCase());
+      if (found && r[found] !== '' && r[found] !== null && r[found] !== undefined) return r[found];
+    }
+    return null;
+  };
+  
+  const regione = get('regione','region','Regione','REGIONE') || 'N/D';
+  const prestazione = get('prestazione','Prestazione','descrizione','servizio','nome_prestazione') || 'N/D';
+  const classe = (get('classe','Classe','priorita','priority') || 'D').toString().toUpperCase().trim();
+  const soglia = SOGLIE[classe] || 30;
+  const tempo = parseFloat(get('tempo_medio_gg','tempo_medio','giorni','days','attesa_media','waiting_days') || 0);
+  let perc = parseFloat(get('perc_nei_tempi','percentuale','pct','compliance','rispetto_soglia') || null);
+  if (isNaN(perc) || perc === null) {
+    perc = tempo > 0 ? Math.max(0, Math.min(100, 100*(1 - Math.max(0,tempo-soglia)/Math.max(1,soglia)))) : null;
+  }
+  const volume = parseInt(get('volume','Volume','prestazioni','n_prestazioni','count','totale') || 0);
+  const mese = get('mese','Mese','periodo','month') || new Date().toISOString().substring(0,7);
+  const fonte = get('fonte','fonte_dato','source') || 'N/D';
+  const sforamento = Math.max(0, tempo - soglia);
+  const stato = perc === null ? 'N/D' : perc < 50 ? 'CRITICO' : perc < (BENCHMARK_MIN[classe]||75) ? 'ATTENZIONE' : 'OK';
+  
+  return { regione, prestazione, classe, soglia_gg: soglia, tempo_medio_gg: isNaN(tempo)?0:Math.round(tempo*10)/10,
+    perc_nei_tempi: isNaN(perc)||perc===null ? null : Math.round(perc*10)/10,
+    sforamento_gg: Math.round(sforamento*10)/10, volume, mese, fonte, stato };
+}
+
+// ============================================================
+// FILTRI
+// ============================================================
+function popolaFiltri() {
+  const regioni = ['ALL', ...new Set(allData.map(d=>d.regione).filter(Boolean).sort())];
+  const prest = ['ALL', ...new Set(allData.map(d=>d.prestazione).filter(Boolean).sort())];
+  
+  const selR = document.getElementById('selRegione');
+  const selP = document.getElementById('selPrestazione');
+  selR.innerHTML = regioni.map(v => `<option value="${v}">${v==='ALL'?'Tutte le Regioni':v}</option>`).join('');
+  selP.innerHTML = prest.map(v => `<option value="${v}">${v==='ALL'?'Tutte le Prestazioni':v}</option>`).join('');
+}
+
+function filterData() {
+  const reg = document.getElementById('selRegione').value;
+  const prest = document.getElementById('selPrestazione').value;
+  filteredData = allData.filter(d =>
+    (reg==='ALL' || d.regione===reg) &&
+    (prest==='ALL' || d.prestazione===prest)
+  );
+  renderAll();
+}
+
+function filterTable() {
+  const q = document.getElementById('searchFilter').value.toLowerCase();
+  const stato = document.getElementById('filterStato').value;
+  const shown = filteredData.filter(d =>
+    (stato==='ALL' || d.stato===stato) &&
+    (!q || d.prestazione.toLowerCase().includes(q) || d.regione.toLowerCase().includes(q))
+  );
+  renderTable(shown);
+  document.getElementById('tableInfo').textContent = `${shown.length} record mostrati su ${filteredData.length}`;
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function renderAll() {
+  if (!filteredData.length) return;
+  renderKPI();
+  renderChartPriority();
+  renderChartCritiche();
+  renderProgressRegioni();
+  renderChartStati();
+  renderTable(filteredData);
+  renderChartRegioni();
+  renderReport();
+}
+
+function renderKPI() {
+  const d = filteredData;
+  const validi = d.filter(x => x.perc_nei_tempi !== null);
+  const critici = d.filter(x => x.stato === 'CRITICO').length;
+  const rispetto = validi.length ? Math.round(validi.reduce((s,x)=>s+x.perc_nei_tempi,0)/validi.length) : 0;
+  const volume = d.reduce((s,x)=>s+x.volume,0);
+  const tempo = d.filter(x=>x.tempo_medio_gg>0);
+  const tempoMedio = tempo.length ? Math.round(tempo.reduce((s,x)=>s+x.tempo_medio_gg,0)/tempo.length*10)/10 : 0;
+  const fonti = [...new Set(d.map(x=>x.fonte).filter(Boolean))].join(', ') || 'N/D';
+  
+  document.getElementById('kpiCritici').textContent = critici;
+  document.getElementById('kpiRispetto').textContent = rispetto + '%';
+  document.getElementById('kpiVolume').textContent = volume.toLocaleString('it-IT');
+  document.getElementById('kpiTempo').textContent = tempoMedio + ' gg';
+  document.getElementById('kpiRecord').textContent = d.length.toLocaleString('it-IT');
+  document.getElementById('kpiFonte').textContent = fonti.substring(0, 20);
+  document.getElementById('kpiFonte').title = fonti;
+}
+
+function dc(id) { if(charts[id]){charts[id].destroy();delete charts[id];} }
+
+function renderChartPriority() {
+  dc('priority');
+  const ctx = document.getElementById('chartPriority').getContext('2d');
+  const classi = ['U','B','D','P'];
+  const medie = classi.map(c => {
+    const sub = filteredData.filter(d=>d.classe===c && d.perc_nei_tempi!==null);
+    return sub.length ? Math.round(sub.reduce((s,d)=>s+d.perc_nei_tempi,0)/sub.length) : null;
+  });
+  charts['priority'] = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:['U – Urgente (≤3gg)','B – Breve (≤10gg)','D – Differibile (≤30gg)','P – Programmabile (≤120gg)'],
+      datasets:[
+        {label:'% nei tempi',data:medie,backgroundColor:['#cf1919','#e07b00','#003087','#00875a'],borderRadius:7},
+        {label:'Soglia min.',data:classi.map(c=>BENCHMARK_MIN[c]),type:'line',borderColor:'#333',
+          borderDash:[5,4],borderWidth:2,backgroundColor:'transparent',pointRadius:4}
+      ]
+    },
+    options:{responsive:true,plugins:{legend:{position:'bottom'}},
+      scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}}}}
+  });
+}
+
+function renderChartCritiche() {
+  dc('critiche');
+  const ctx = document.getElementById('chartCritiche').getContext('2d');
+  const top10 = [...filteredData].filter(d=>d.perc_nei_tempi!==null)
+    .sort((a,b)=>a.perc_nei_tempi-b.perc_nei_tempi).slice(0,10);
+  const colori = top10.map(d => d.stato==='CRITICO'?'#cf1919':'#e07b00');
+  charts['critiche'] = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:top10.map(d=>(d.prestazione.substring(0,18)+'…').replace('……','…')+' ('+d.regione.substring(0,5)+')'),
+      datasets:[{label:'% nei tempi',data:top10.map(d=>d.perc_nei_tempi),backgroundColor:colori,borderRadius:5}]
+    },
+    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
+      scales:{x:{min:0,max:100,ticks:{callback:v=>v+'%'}}}}
+  });
+}
+
+function renderProgressRegioni() {
+  const regs = [...new Set(filteredData.map(d=>d.regione))].sort();
+  let html = '';
+  regs.forEach(reg => {
+    const sub = filteredData.filter(d=>d.regione===reg && d.perc_nei_tempi!==null);
+    if (!sub.length) return;
+    const perc = Math.round(sub.reduce((s,d)=>s+d.perc_nei_tempi,0)/sub.length);
+    const col = perc>=80?'var(--verde)':perc>=65?'var(--arancio)':'var(--rosso)';
+    html += `<div class="progress-row">
+      <div class="progress-label" title="${reg}">${reg.substring(0,18)}</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${perc}%;background:${col}"></div></div>
+      <div class="progress-val" style="color:${col}">${perc}%</div>
+    </div>`;
+  });
+  document.getElementById('progressRegioni').innerHTML = html || '<p style="color:#aaa;font-size:0.82rem;">Nessun dato</p>';
+}
+
+function renderChartStati() {
+  dc('stati');
+  const ctx = document.getElementById('chartStati').getContext('2d');
+  const ok = filteredData.filter(d=>d.stato==='OK').length;
+  const att = filteredData.filter(d=>d.stato==='ATTENZIONE').length;
+  const crit = filteredData.filter(d=>d.stato==='CRITICO').length;
+  const nd = filteredData.filter(d=>d.stato==='N/D').length;
+  charts['stati'] = new Chart(ctx, {
+    type:'doughnut',
+    data:{
+      labels:['🟢 OK','🟡 Attenzione','🔴 Critico','⚪ N/D'],
+      datasets:[{data:[ok,att,crit,nd],backgroundColor:['#00875a','#e07b00','#cf1919','#ccc'],borderWidth:2}]
+    },
+    options:{responsive:true,plugins:{legend:{position:'bottom'}}}
+  });
+}
+
+function renderTable(data) {
+  const tbody = document.getElementById('tbodyDati');
+  tbody.innerHTML = data.map(d => {
+    const stato_pill = d.stato==='CRITICO'?'critical':d.stato==='ATTENZIONE'?'warning':d.stato==='OK'?'ok':'';
+    const stato_icon = d.stato==='CRITICO'?'🔴':d.stato==='ATTENZIONE'?'🟡':d.stato==='OK'?'🟢':'⚪';
+    return `<tr>
+      <td>${d.regione}</td>
+      <td>${d.prestazione}</td>
+      <td><span class="pill ${d.classe}">${d.classe}</span></td>
+      <td style="font-weight:700;color:${d.tempo_medio_gg>d.soglia_gg?'#b00000':'#007a3d'}">${d.tempo_medio_gg||'—'}</td>
+      <td>${d.soglia_gg}</td>
+      <td style="color:${d.sforamento_gg>0?'#b00000':'#007a3d'};font-weight:600;">
+        ${d.sforamento_gg>0?'+'+d.sforamento_gg+' gg':'✓'}
+      </td>
+      <td>${d.perc_nei_tempi!==null?d.perc_nei_tempi+'%':'—'}</td>
+      <td>${d.volume.toLocaleString('it-IT')}</td>
+      <td><span class="pill ${stato_pill}">${stato_icon} ${d.stato}</span></td>
+      <td style="font-size:0.68rem;color:#999;">${(d.fonte||'').substring(0,20)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('tableInfo').textContent = `${data.length} record`;
+}
+
+function renderChartRegioni() {
+  dc('regioni');
+  const ctx = document.getElementById('chartRegioni').getContext('2d');
+  const regs = [...new Set(filteredData.map(d=>d.regione))];
+  const pairs = regs.map(reg => {
+    const sub = filteredData.filter(d=>d.regione===reg && d.perc_nei_tempi!==null);
+    return {reg, perc: sub.length?Math.round(sub.reduce((s,d)=>s+d.perc_nei_tempi,0)/sub.length):0};
+  }).sort((a,b)=>b.perc-a.perc);
+  charts['regioni'] = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:pairs.map(x=>x.reg),
+      datasets:[{label:'% Prestazioni nei tempi',
+        data:pairs.map(x=>x.perc),
+        backgroundColor:pairs.map(x=>x.perc>=80?'#00875a':x.perc>=65?'#e07b00':'#cf1919'),
+        borderRadius:7}]
+    },
+    options:{responsive:true,plugins:{legend:{display:false}},
+      scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}}}}
+  });
+}
+
+function renderReport() {
+  const d = filteredData;
+  if (!d.length) return;
+  const validi = d.filter(x=>x.perc_nei_tempi!==null);
+  const perc = validi.length?Math.round(validi.reduce((s,x)=>s+x.perc_nei_tempi,0)/validi.length):0;
+  const critici = d.filter(x=>x.stato==='CRITICO').length;
+  const vol = d.reduce((s,x)=>s+x.volume,0);
+  const tempo = d.filter(x=>x.tempo_medio_gg>0);
+  const tm = tempo.length?Math.round(tempo.reduce((s,x)=>s+x.tempo_medio_gg,0)/tempo.length*10)/10:0;
+  const regSel = document.getElementById('selRegione').value;
+  const regNome = regSel==='ALL'?'Tutte le Regioni':regSel;
+  const fonti = [...new Set(d.map(x=>x.fonte).filter(Boolean))].join(', ');
+  const peggiori = [...d].filter(x=>x.perc_nei_tempi!==null).sort((a,b)=>a.perc_nei_tempi-b.perc_nei_tempi).slice(0,5);
+  
+  document.getElementById('reportContent').innerHTML = `
+    <div style="font-family:Georgia,serif;padding:16px;border:1px solid #ccc;border-radius:8px;font-size:0.85rem;line-height:1.8;">
+      <div style="text-align:center;border-bottom:2px solid #003087;padding-bottom:12px;margin-bottom:16px;">
+        <div style="font-size:0.7rem;color:#666;text-transform:uppercase;letter-spacing:1px;">Servizio Sanitario Nazionale</div>
+        <h2 style="color:#003087;margin:6px 0;font-size:1.1rem;">REPORT MONITORAGGIO LISTE DI ATTESA</h2>
+        <div style="color:#555;font-size:0.8rem;">Area: <strong>${regNome}</strong> · Generato: <strong>${new Date().toLocaleString('it-IT')}</strong></div>
+        <div style="color:#888;font-size:0.7rem;">Fonte dati: ${fonti} · Legge 107/2024 · PNGLA 2025-2027</div>
+      </div>
+      <h3 style="color:#003087;font-size:0.95rem;">1. SINTESI</h3>
+      <p>% media nei tempi: <strong>${perc}%</strong> · Tempo medio: <strong>${tm} gg</strong> · Volume: <strong>${vol.toLocaleString('it-IT')}</strong> · Record critici: <strong style="color:${critici>10?'#b00000':'#a05a00'}">${critici}</strong></p>
+      <h3 style="color:#003087;font-size:0.95rem;margin-top:14px;">2. CLASSI DI PRIORITÀ</h3>
+      ${['U','B','D','P'].map(c=>{
+        const sub=d.filter(x=>x.classe===c&&x.perc_nei_tempi!==null);
+        if(!sub.length)return '';
+        const p=Math.round(sub.reduce((s,x)=>s+x.perc_nei_tempi,0)/sub.length);
+        const ok=p>=BENCHMARK_MIN[c];
+        return `<p>• Classe <strong>${c}</strong>: ${p}% nei tempi <span style="color:${ok?'#007a3d':'#b00000'}">${ok?'✅ CONFORME':'⚠️ NON CONFORME'}</span></p>`;
+      }).join('')}
+      <h3 style="color:#003087;font-size:0.95rem;margin-top:14px;">3. CRITICITÀ PRIORITARIE</h3>
+      ${peggiori.map(x=>`<p>🔴 <strong>${x.prestazione}</strong> (${x.regione}, Classe ${x.classe}): ${x.tempo_medio_gg} gg vs soglia ${x.soglia_gg} gg — ${x.perc_nei_tempi}% nei tempi</p>`).join('')}
+      <h3 style="color:#003087;font-size:0.95rem;margin-top:14px;">4. AZIONI RACCOMANDATE</h3>
+      <p>${critici>20?'🔴 Attivare percorsi di tutela e verificare agende private accreditate.':critici>5?'🟡 Valutare apertura agende serali e reclutamento aggiuntivo.':'🟢 Situazione soddisfacente. Mantenere monitoraggio mensile.'}</p>
+      <p>• Verificare inclusione di tutte le agende nel CUP regionale (art. PNGLA 2025)</p>
+      <p>• Garantire utilizzo apparecchiature diagnostiche ≥80% capacità produttiva</p>
+      <div style="margin-top:16px;padding-top:10px;border-top:1px solid #ccc;font-size:0.68rem;color:#888;text-align:center;">
+        Fonte: ${fonti} · ai sensi Legge 107/2024 · D.M. 17 febbraio 2025
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// UTILITÀ
+// ============================================================
+function setStatus(type, msg) {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'loading ' + type; // reset + nuovo tipo
+  bar.className = type;
+  bar.innerHTML = (type==='loading'?'<div class="spinner"></div>':'') + `<span>${msg}</span>`;
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names=['overview','tabella','regioni','report'];
+    t.classList.toggle('active', names[i]===name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+function sortTable(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = true; }
+  const sorted = [...filteredData].sort((a,b) => {
+    const av = a[key], bv = b[key];
+    if (av === null) return 1; if (bv === null) return -1;
+    return sortAsc ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+  });
+  renderTable(sorted);
+}
+
+function esportaCSV() {
+  const cols = ['regione','prestazione','classe','soglia_gg','tempo_medio_gg','perc_nei_tempi','sforamento_gg','volume','stato','fonte','mese'];
+  const header = cols.join(',');
+  const rows = filteredData.map(d => cols.map(c => `"${d[c]??''}"`).join(','));
+  const blob = new Blob([header+'\n'+rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url;
+  a.download = `liste_attesa_${new Date().toISOString().substring(0,10)}.csv`;
+  a.click();
+}
+
+function stampaReport() { window.print(); }
+
+// Init
+onSorgenteChange();
+</script>
+</body>
+</html>

@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor Liste di Attesa SSN — PNLA Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --blu: #003087;
+    --verde: #00875a;
+    --rosso: #cf1919;
+    --arancio: #e07b00;
+    --grigio: #f4f6f9;
+    --bordo: #dce3ee;
+    --testo: #1a1a2e;
+    --bianco: #ffffff;
+    --ombra: 0 2px 12px rgba(0,48,135,0.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+  body { background: var(--grigio); color: var(--testo); min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, var(--blu) 0%, #0050b3 100%);
+    color: white; padding: 18px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }
+  header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.3px; }
+  header .sub { font-size: 0.78rem; opacity: 0.85; margin-top: 3px; }
+  .badge-pngla {
+    background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 20px; padding: 5px 14px; font-size: 0.75rem; font-weight: 600;
+  }
+
+  .toolbar {
+    background: white; border-bottom: 2px solid var(--bordo);
+    padding: 14px 32px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+  }
+  .toolbar label { font-size: 0.8rem; color: #555; font-weight: 600; }
+  .toolbar select, .toolbar input[type=file] {
+    border: 1.5px solid var(--bordo); border-radius: 8px;
+    padding: 7px 12px; font-size: 0.85rem; color: var(--testo);
+    background: var(--grigio); cursor: pointer;
+  }
+  .toolbar select:focus { outline: 2px solid var(--blu); }
+  .btn {
+    background: var(--blu); color: white; border: none;
+    border-radius: 8px; padding: 8px 18px; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .btn:hover { background: #0050b3; }
+  .btn.secondary { background: var(--verde); }
+  .btn.secondary:hover { background: #006644; }
+  .btn.danger { background: var(--rosso); }
+
+  main { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+
+  /* KPI Cards */
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 16px; margin-bottom: 24px; }
+  .kpi {
+    background: white; border-radius: 14px; padding: 20px 22px;
+    box-shadow: var(--ombra); border-left: 5px solid var(--blu);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .kpi.ok { border-left-color: var(--verde); }
+  .kpi.warning { border-left-color: var(--arancio); }
+  .kpi.critical { border-left-color: var(--rosso); }
+  .kpi .label { font-size: 0.75rem; color: #666; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi .value { font-size: 2rem; font-weight: 800; line-height: 1; }
+  .kpi .sub-kpi { font-size: 0.78rem; color: #888; }
+  .kpi.ok .value { color: var(--verde); }
+  .kpi.warning .value { color: var(--arancio); }
+  .kpi.critical .value { color: var(--rosso); }
+
+  /* Grid layout */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: white; border-radius: 14px; padding: 22px;
+    box-shadow: var(--ombra); border: 1px solid var(--bordo);
+  }
+  .card h3 { font-size: 0.95rem; font-weight: 700; color: var(--blu); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px; }
+  .card h3 .icon { font-size: 1.1rem; }
+
+  /* Tabella */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+  th { background: var(--blu); color: white; padding: 10px 12px; text-align: left; font-weight: 600; font-size: 0.78rem; }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--bordo); }
+  tr:hover td { background: #f0f4ff; }
+  .pill {
+    display: inline-block; border-radius: 20px; padding: 3px 11px;
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  }
+  .pill.ok { background: #d4f5e4; color: #007a3d; }
+  .pill.warning { background: #fff3cc; color: #a05a00; }
+  .pill.critical { background: #ffe0e0; color: #b00000; }
+  .pill.U { background: #ffeaea; color: #900; }
+  .pill.B { background: #fff3d4; color: #7a4a00; }
+  .pill.D { background: #d4eaff; color: #003d99; }
+  .pill.P { background: #e8f5e4; color: #1a6600; }
+
+  /* Semaforo */
+  .semaph { display: flex; gap: 6px; align-items: center; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .dot.green { background: var(--verde); }
+  .dot.yellow { background: var(--arancio); }
+  .dot.red { background: var(--rosso); }
+
+  /* Progress bar */
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .progress-label { font-size: 0.78rem; width: 150px; flex-shrink: 0; }
+  .progress-bar { flex: 1; background: #e8ecf5; border-radius: 8px; height: 12px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 8px; transition: width 0.5s; }
+  .progress-val { font-size: 0.78rem; font-weight: 700; width: 45px; text-align: right; }
+
+  /* Upload area */
+  .upload-area {
+    border: 2px dashed var(--bordo); border-radius: 12px;
+    padding: 30px; text-align: center; color: #888; font-size: 0.85rem;
+    cursor: pointer; transition: border 0.2s;
+    background: var(--grigio); margin-bottom: 20px;
+  }
+  .upload-area:hover { border-color: var(--blu); color: var(--blu); }
+
+  /* Alert */
+  .alert {
+    padding: 12px 18px; border-radius: 10px; font-size: 0.82rem; margin-bottom: 12px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .alert.critical { background: #fff0f0; border-left: 4px solid var(--rosso); color: #800000; }
+  .alert.warning { background: #fffbec; border-left: 4px solid var(--arancio); color: #7a4a00; }
+  .alert.info { background: #e8f0ff; border-left: 4px solid var(--blu); color: #002070; }
+
+  .section-title {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; color: #888; margin-bottom: 10px;
+  }
+
+  .report-btn { margin-top: 20px; width: 100%; }
+  .footer { text-align: center; font-size: 0.72rem; color: #aaa; padding: 20px; }
+  canvas { max-height: 280px; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+  .tab {
+    padding: 8px 18px; border-radius: 8px 8px 0 0; font-size: 0.82rem; font-weight: 600;
+    cursor: pointer; border: 1.5px solid var(--bordo); border-bottom: none;
+    background: var(--grigio); color: #555; transition: all 0.2s;
+  }
+  .tab.active { background: white; color: var(--blu); border-color: var(--bordo); box-shadow: 0 -2px 6px rgba(0,48,135,0.08); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🏥 Monitor Liste di Attesa SSN</h1>
+    <div class="sub">Basato su PNLA – AGENAS · Piano Nazionale di Governo delle Liste di Attesa (PNGLA) · Legge 107/2024</div>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <span class="badge-pngla">🔴 U ≤3gg · 🟡 B ≤10gg · 🔵 D ≤30gg · 🟢 P ≤120gg</span>
+    <span id="lastUpdate" class="badge-pngla" style="font-size:0.7rem;"></span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div>
+    <label>📍 Regione / ASL</label><br>
+    <select id="selRegione" onchange="filterData()">
+      <option value="ALL">Tutte le Regioni</option>
+      <option value="Sicilia">Sicilia</option>
+      <option value="Lombardia">Lombardia</option>
+      <option value="Lazio">Lazio</option>
+      <option value="Campania">Campania</option>
+      <option value="Veneto">Veneto</option>
+      <option value="Toscana">Toscana</option>
+      <option value="Emilia-Romagna">Emilia-Romagna</option>
+      <option value="Calabria">Calabria</option>
+      <option value="Sardegna">Sardegna</option>
+      <option value="Puglia">Puglia</option>
+    </select>
+  </div>
+  <div>
+    <label>🔬 Prestazione</label><br>
+    <select id="selPrestazione" onchange="filterData()">
+      <option value="ALL">Tutte</option>
+      <option value="Prima Visita Cardiologica">Visita Cardiologica</option>
+      <option value="Prima Visita Ortopedica">Visita Ortopedica</option>
+      <option value="Prima Visita Neurologica">Visita Neurologica</option>
+      <option value="TAC (con o senza c.m.)">TAC</option>
+      <option value="Risonanza Magnetica">Risonanza Magnetica</option>
+      <option value="Ecografia">Ecografia</option>
+      <option value="Mammografia">Mammografia</option>
+      <option value="Colonscopia">Colonscopia</option>
+      <option value="Visita Oculistica">Visita Oculistica</option>
+      <option value="Visita Dermatologica">Visita Dermatologica</option>
+    </select>
+  </div>
+  <div>
+    <label>📅 Mese di riferimento</label><br>
+    <select id="selMese" onchange="filterData()">
+      <option value="2025-09">Settembre 2025</option>
+      <option value="2025-08">Agosto 2025</option>
+      <option value="2025-07">Luglio 2025</option>
+      <option value="2025-06">Giugno 2025</option>
+    </select>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    <label>📂 Carica CSV (formato PNLA)</label>
+    <input type="file" id="csvFile" accept=".csv" onchange="loadCSV(event)">
+  </div>
+  <button class="btn secondary" onclick="exportReport()">📄 Genera Report PDF</button>
+  <button class="btn" onclick="loadDemoData()">🎯 Carica Dati Demo</button>
+</div>
+
+<main>
+
+  <!-- Legenda classi di priorità -->
+  <div class="alert info" style="margin-bottom:18px;">
+    <span>ℹ️</span>
+    <span><strong>Classi di priorità PNGLA:</strong> 
+    <span class="pill U">U – Urgente</span> entro 3 giorni · 
+    <span class="pill B">B – Breve</span> entro 10 giorni · 
+    <span class="pill D">D – Differibile</span> entro 30 giorni · 
+    <span class="pill P">P – Programmabile</span> entro 120 giorni.
+    In rosso le prestazioni che <strong>superano i limiti di legge</strong>.</span>
+  </div>
+
+  <!-- KPI principali -->
+  <div class="kpi-row" id="kpiRow">
+    <div class="kpi critical"><div class="label">Prestazioni fuori soglia</div><div class="value" id="kpiCritici">-</div><div class="sub-kpi">Superano limiti PNGLA</div></div>
+    <div class="kpi warning"><div class="label">% Rispetto soglie</div><div class="value" id="kpiRispetto">-</div><div class="sub-kpi">Media tutte le classi</div></div>
+    <div class="kpi ok"><div class="label">Volume prestazioni</div><div class="value" id="kpiVolume">-</div><div class="sub-kpi">Nel periodo selezionato</div></div>
+    <div class="kpi"><div class="label">Tempo medio attesa</div><div class="value" id="kpiTempo">-</div><div class="sub-kpi">Giorni (tutte le classi)</div></div>
+    <div class="kpi critical"><div class="label">Rinuncia stimata</div><div class="value" id="kpiRinuncia">-</div><div class="sub-kpi">% pazienti (stima ISTAT)</div></div>
+  </div>
+
+  <!-- Alert critici -->
+  <div id="alertBox"></div>
+
+  <!-- Tab navigation -->
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('overview')">📊 Panoramica</div>
+    <div class="tab" onclick="showTab('prestazioni')">🔬 Per Prestazione</div>
+    <div class="tab" onclick="showTab('regioni')">🗺️ Per Regione</div>
+    <div class="tab" onclick="showTab('trend')">📈 Trend Temporale</div>
+    <div class="tab" onclick="showTab('report')">📋 Report Regionale</div>
+  </div>
+
+  <!-- TAB OVERVIEW -->
+  <div id="tab-overview" class="tab-content active">
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon">🎯</span> Rispetto soglie per Classe di Priorità</h3>
+        <canvas id="chartPriority"></canvas>
+      </div>
+      <div class="card">
+        <h3><span class="icon">📊</span> Distribuzione Tempi Medi per Prestazione</h3>
+        <canvas id="chartPrestazioni"></canvas>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon">🏥</span> Rispetto soglie per Regione (%)</h3>
+        <div id="progressRegioni"></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon">⚠️</span> Criticità principali</h3>
+        <div id="criticitaList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB PRESTAZIONI -->
+  <div id="tab-prestazioni" class="tab-content">
+    <div class="card">
+      <h3><span class="icon">🔬</span> Dettaglio per Prestazione e Classe di Priorità</h3>
+      <div class="table-wrap">
+        <table id="tablePrestazioni">
+          <thead>
+            <tr>
+              <th>Prestazione</th>
+              <th>Classe</th>
+              <th>Soglia (gg)</th>
+              <th>Tempo medio (gg)</th>
+              <th>% nei tempi</th>
+              <th>Volume</th>
+              <th>Stato</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyPrestazioni"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB REGIONI -->
+  <div id="tab-regioni" class="tab-content">
+    <div class="card">
+      <h3><span class="icon">🗺️</span> Confronto Regionale — % Prestazioni nei Tempi</h3>
+      <canvas id="chartRegioni" style="max-height:350px;"></canvas>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h3><span class="icon">📋</span> Tabella Comparativa Regioni</h3>
+      <div class="table-wrap">
+        <table id="tableRegioni">
+          <thead>
+            <tr>
+              <th>Regione</th>
+              <th>% Prestazioni nei Tempi</th>
+              <th>Tempo medio (gg)</th>
+              <th>Prestazioni critiche</th>
+              <th>Volume totale</th>
+              <th>Benchmark Nazionale</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyRegioni"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB TREND -->
+  <div id="tab-trend" class="tab-content">
+    <div class="card">
+      <h3><span class="icon">📈</span> Andamento Temporale Tempi di Attesa (Gen–Set 2025)</h3>
+      <canvas id="chartTrend" style="max-height:320px;"></canvas>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h3><span class="icon">🔮</span> Proiezione prossimi 3 mesi (stima algoritmica)</h3>
+      <canvas id="chartProiezione" style="max-height:280px;"></canvas>
+    </div>
+  </div>
+
+  <!-- TAB REPORT -->
+  <div id="tab-report" class="tab-content">
+    <div class="card">
+      <h3><span class="icon">📋</span> Report Automatico — Pronto per Regione/Ministero</h3>
+      <div id="reportContent" style="font-size:0.85rem; line-height:1.7;"></div>
+      <button class="btn secondary report-btn" onclick="exportReport()">📄 Esporta Report (stampa/PDF)</button>
+    </div>
+  </div>
+
+</main>
+
+<div class="footer">
+  Monitor Liste di Attesa SSN · Basato su dati PNLA-AGENAS · Legge 107/2024 · PNGLA 2025-2027<br>
+  Fonte dati: <a href="https://www.portaletrasparenzaservizisanitari.it/pnla/" target="_blank">portaletrasparenzaservizisanitari.it</a> · 
+  <a href="https://www.agenas.gov.it" target="_blank">agenas.gov.it</a>
+</div>
+
+<script>
+// ==================== DATI STRUTTURA ====================
+const SOGLIE_PNGLA = { 'U': 3, 'B': 10, 'D': 30, 'P': 120 };
+const CLASSI = ['U','B','D','P'];
+const CLASSI_NOME = { 'U':'Urgente (≤3gg)','B':'Breve (≤10gg)','D':'Differibile (≤30gg)','P':'Programmabile (≤120gg)' };
+
+const PRESTAZIONI_TRACCIANTI = [
+  'Prima Visita Cardiologica','Prima Visita Ortopedica','Prima Visita Neurologica',
+  'TAC (con o senza c.m.)','Risonanza Magnetica','Ecografia','Mammografia',
+  'Colonscopia','Visita Oculistica','Visita Dermatologica'
+];
+
+const REGIONI = [
+  'Lombardia','Lazio','Campania','Sicilia','Veneto',
+  'Toscana','Emilia-Romagna','Puglia','Calabria','Sardegna'
+];
+
+// Benchmark di accettabilità: % nei tempi minima accettabile per classe
+const BENCHMARK_MIN = { 'U': 90, 'B': 80, 'D': 75, 'P': 70 };
+
+let allData = [];
+let charts = {};
+
+// ==================== GENERATORE DATI DEMO ====================
+function generateDemoData() {
+  const data = [];
+  const mesi = ['2025-01','2025-02','2025-03','2025-04','2025-05','2025-06','2025-07','2025-08','2025-09'];
+  
+  // Profili regionali realistici (basati su dati pubblici 2024-2025)
+  const profiloRegione = {
+    'Lombardia':   { base: 0.82, trend: 0.01, vol: 120000 },
+    'Lazio':       { base: 0.74, trend: 0.015, vol: 85000 },
+    'Campania':    { base: 0.58, trend: 0.008, vol: 72000 },
+    'Sicilia':     { base: 0.61, trend: 0.01, vol: 65000 },
+    'Veneto':      { base: 0.85, trend: 0.005, vol: 95000 },
+    'Toscana':     { base: 0.80, trend: 0.012, vol: 78000 },
+    'Emilia-Romagna': { base: 0.88, trend: 0.005, vol: 88000 },
+    'Puglia':      { base: 0.65, trend: 0.009, vol: 60000 },
+    'Calabria':    { base: 0.48, trend: 0.012, vol: 35000 },
+    'Sardegna':    { base: 0.62, trend: 0.008, vol: 42000 }
+  };
+
+  const moltiplicatoriPrestazione = {
+    'Prima Visita Cardiologica': 1.0, 'Prima Visita Ortopedica': 0.85,
+    'Prima Visita Neurologica': 0.78, 'TAC (con o senza c.m.)': 0.92,
+    'Risonanza Magnetica': 0.70, 'Ecografia': 0.95,
+    'Mammografia': 0.88, 'Colonscopia': 0.75,
+    'Visita Oculistica': 0.82, 'Visita Dermatologica': 0.80
+  };
+
+  const moltiplicatoriClasse = { 'U': 1.15, 'B': 1.0, 'D': 0.85, 'P': 0.70 };
+
+  REGIONI.forEach(reg => {
+    const profilo = profiloRegione[reg];
+    mesi.forEach((mese, mi) => {
+      PRESTAZIONI_TRACCIANTI.forEach(prest => {
+        CLASSI.forEach(classe => {
+          const perc_base = Math.min(0.98,
+            profilo.base * moltiplicatoriPrestazione[prest] * moltiplicatoriClasse[classe]
+            + profilo.trend * mi + (Math.random()-0.5)*0.06
+          );
+          const soglia = SOGLIE_PNGLA[classe];
+          const tempo_medio = soglia * (1 + (1 - perc_base) * 2.5 + Math.random()*0.3);
+          const volume = Math.round(profilo.vol / (PRESTAZIONI_TRACCIANTI.length * CLASSI.length) * (0.7+Math.random()*0.6));
+          
+          data.push({
+            regione: reg, mese, prestazione: prest, classe,
+            soglia_gg: soglia,
+            tempo_medio_gg: Math.round(tempo_medio * 10)/10,
+            perc_nei_tempi: Math.round(Math.min(0.99, Math.max(0.1, perc_base)) * 1000)/10,
+            volume
+          });
+        });
+      });
+    });
+  });
+  return data;
+}
+
+// ==================== FILTRI ====================
+function getFiltered() {
+  const reg = document.getElementById('selRegione').value;
+  const prest = document.getElementById('selPrestazione').value;
+  const mese = document.getElementById('selMese').value;
+  return allData.filter(d =>
+    (reg === 'ALL' || d.regione === reg) &&
+    (prest === 'ALL' || d.prestazione === prest) &&
+    d.mese === mese
+  );
+}
+
+function filterData() { renderAll(); }
+
+// ==================== RENDER ====================
+function renderAll() {
+  const data = getFiltered();
+  if (!data.length) return;
+  renderKPI(data);
+  renderAlerts(data);
+  renderChartPriority(data);
+  renderChartPrestazioni(data);
+  renderProgressRegioni(data);
+  renderCriticita(data);
+  renderTablePrestazioni(data);
+  renderTableRegioni(data);
+  renderChartRegioni(data);
+  renderTrend();
+  renderReport(data);
+  document.getElementById('lastUpdate').textContent = 'Aggiornato: ' + new Date().toLocaleDateString('it-IT');
+}
+
+function renderKPI(data) {
+  const critici = data.filter(d => d.perc_nei_tempi < BENCHMARK_MIN[d.classe]).length;
+  const rispetto = Math.round(data.reduce((s,d) => s + d.perc_nei_tempi, 0) / data.length);
+  const volume = data.reduce((s,d) => s + d.volume, 0);
+  const tempo = Math.round(data.reduce((s,d) => s + d.tempo_medio_gg, 0) / data.length * 10)/10;
+  
+  document.getElementById('kpiCritici').textContent = critici;
+  document.getElementById('kpiRispetto').textContent = rispetto + '%';
+  document.getElementById('kpiVolume').textContent = volume.toLocaleString('it-IT');
+  document.getElementById('kpiTempo').textContent = tempo + ' gg';
+  document.getElementById('kpiRinuncia').textContent = rispetto > 75 ? '~6.5%' : '~9.2%';
+}
+
+function renderAlerts(data) {
+  const box = document.getElementById('alertBox');
+  const critiche = data.filter(d => d.perc_nei_tempi < 50 && d.classe === 'U');
+  let html = '';
+  if (critiche.length) {
+    const esempi = critiche.slice(0,3).map(d => `${d.prestazione} (${d.regione}): ${d.tempo_medio_gg}gg vs soglia ${d.soglia_gg}gg`);
+    html += `<div class="alert critical">🚨 <div><strong>ALLARME – Classe U (Urgente):</strong> ${critiche.length} prestazioni con meno del 50% nei tempi. Es: ${esempi.join(' · ')}</div></div>`;
+  }
+  const soglioB = data.filter(d => d.perc_nei_tempi < BENCHMARK_MIN[d.classe] && d.classe === 'B').length;
+  if (soglioB > 5) {
+    html += `<div class="alert warning">⚠️ <div><strong>Attenzione – Classe B (Breve):</strong> ${soglioB} prestazioni fuori soglia. Valutare attivazione percorsi di tutela.</div></div>`;
+  }
+  box.innerHTML = html;
+}
+
+function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function renderChartPriority(data) {
+  destroyChart('priority');
+  const ctx = document.getElementById('chartPriority').getContext('2d');
+  const medie = CLASSI.map(c => {
+    const sub = data.filter(d => d.classe === c);
+    return sub.length ? Math.round(sub.reduce((s,d) => s+d.perc_nei_tempi,0)/sub.length) : 0;
+  });
+  const colori = ['#cf1919','#e07b00','#003087','#00875a'];
+  charts['priority'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: CLASSI.map(c => CLASSI_NOME[c]),
+      datasets: [{
+        label: '% Prestazioni nei tempi',
+        data: medie,
+        backgroundColor: colori,
+        borderRadius: 8,
+      }, {
+        label: 'Soglia minima accettabile',
+        data: CLASSI.map(c => BENCHMARK_MIN[c]),
+        type: 'line', borderColor: '#333', borderDash: [5,4],
+        backgroundColor: 'transparent', pointRadius: 4, borderWidth: 2
+      }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } },
+      scales: { y: { min: 0, max: 100, ticks: { callback: v => v+'%' } } } }
+  });
+}
+
+function renderChartPrestazioni(data) {
+  destroyChart('prestazioni');
+  const ctx = document.getElementById('chartPrestazioni').getContext('2d');
+  const prests = [...new Set(data.map(d => d.prestazione))];
+  const tempi = prests.map(p => {
+    const sub = data.filter(d => d.prestazione === p);
+    return Math.round(sub.reduce((s,d) => s+d.tempo_medio_gg,0)/sub.length * 10)/10;
+  });
+  const soglie = prests.map(p => {
+    const sub = data.filter(d => d.prestazione === p);
+    return Math.round(sub.reduce((s,d) => s+d.soglia_gg,0)/sub.length * 10)/10;
+  });
+  const colori = tempi.map((t,i) => t > soglie[i]*1.5 ? '#cf1919' : t > soglie[i] ? '#e07b00' : '#00875a');
+  charts['prestazioni'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: prests.map(p => p.length > 18 ? p.substring(0,16)+'…' : p),
+      datasets: [{
+        label: 'Tempo medio (gg)',
+        data: tempi, backgroundColor: colori, borderRadius: 6
+      }]
+    },
+    options: { indexAxis: 'y', responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { x: { title: { display: true, text: 'Giorni' } } } }
+  });
+}
+
+function renderProgressRegioni(data) {
+  const container = document.getElementById('progressRegioni');
+  const regs = [...new Set(data.map(d => d.regione))].sort();
+  let html = '';
+  regs.forEach(reg => {
+    const sub = data.filter(d => d.regione === reg);
+    const perc = Math.round(sub.reduce((s,d) => s+d.perc_nei_tempi,0)/sub.length);
+    const col = perc >= 80 ? '#00875a' : perc >= 65 ? '#e07b00' : '#cf1919';
+    html += `<div class="progress-row">
+      <div class="progress-label">${reg}</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${perc}%;background:${col}"></div></div>
+      <div class="progress-val" style="color:${col}">${perc}%</div>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+function renderCriticita(data) {
+  const sorted = [...data].sort((a,b) => a.perc_nei_tempi - b.perc_nei_tempi).slice(0,6);
+  let html = '';
+  sorted.forEach(d => {
+    const stato = d.perc_nei_tempi < 50 ? 'critical' : 'warning';
+    html += `<div class="alert ${stato}" style="margin-bottom:8px;padding:9px 14px;">
+      <span>${stato==='critical'?'🚨':'⚠️'}</span>
+      <span><strong>${d.prestazione}</strong> — ${d.regione} — Classe <span class="pill ${d.classe}">${d.classe}</span><br>
+      Tempo: <strong>${d.tempo_medio_gg} gg</strong> (soglia ${d.soglia_gg} gg) · Nei tempi: <strong>${d.perc_nei_tempi}%</strong></span>
+    </div>`;
+  });
+  document.getElementById('criticitaList').innerHTML = html || '<div class="alert info">✅ Nessuna criticità rilevante</div>';
+}
+
+function renderTablePrestazioni(data) {
+  const tbody = document.getElementById('tbodyPrestazioni');
+  const rows = [...data].sort((a,b) => a.perc_nei_tempi - b.perc_nei_tempi);
+  tbody.innerHTML = rows.map(d => {
+    const ok = d.perc_nei_tempi >= BENCHMARK_MIN[d.classe];
+    const stato = d.perc_nei_tempi < 50 ? 'critical' : ok ? 'ok' : 'warning';
+    const label = d.perc_nei_tempi < 50 ? '🔴 Critico' : ok ? '🟢 OK' : '🟡 Attenzione';
+    return `<tr>
+      <td>${d.prestazione}</td>
+      <td><span class="pill ${d.classe}">${d.classe} – ${SOGLIE_PNGLA[d.classe]}gg</span></td>
+      <td>${d.soglia_gg}</td>
+      <td style="font-weight:700;color:${d.tempo_medio_gg > d.soglia_gg ? '#b00000' : '#007a3d'}">${d.tempo_medio_gg}</td>
+      <td>${d.perc_nei_tempi}%</td>
+      <td>${d.volume.toLocaleString('it-IT')}</td>
+      <td><span class="pill ${stato}">${label}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderTableRegioni(data) {
+  const tbody = document.getElementById('tbodyRegioni');
+  const regs = [...new Set(data.map(d => d.regione))];
+  const righe = regs.map(reg => {
+    const sub = data.filter(d => d.regione === reg);
+    const perc = Math.round(sub.reduce((s,d) => s+d.perc_nei_tempi,0)/sub.length);
+    const tempo = Math.round(sub.reduce((s,d) => s+d.tempo_medio_gg,0)/sub.length * 10)/10;
+    const critici = sub.filter(d => d.perc_nei_tempi < BENCHMARK_MIN[d.classe]).length;
+    const vol = sub.reduce((s,d) => s+d.volume,0);
+    return { reg, perc, tempo, critici, vol };
+  }).sort((a,b) => b.perc - a.perc);
+
+  const mediaNaz = Math.round(righe.reduce((s,r) => s+r.perc,0)/righe.length);
+
+  tbody.innerHTML = righe.map(r => {
+    const vs = r.perc >= mediaNaz ? `<span style="color:var(--verde)">▲ +${r.perc-mediaNaz}pp</span>` : `<span style="color:var(--rosso)">▼ ${r.perc-mediaNaz}pp</span>`;
+    const stato = r.perc >= 80 ? 'ok' : r.perc >= 65 ? 'warning' : 'critical';
+    return `<tr>
+      <td><strong>${r.reg}</strong></td>
+      <td><span class="pill ${stato}">${r.perc}%</span></td>
+      <td>${r.tempo} gg</td>
+      <td>${r.critici}</td>
+      <td>${r.vol.toLocaleString('it-IT')}</td>
+      <td>${vs} vs media naz. ${mediaNaz}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderChartRegioni(data) {
+  destroyChart('regioni');
+  const ctx = document.getElementById('chartRegioni').getContext('2d');
+  const regs = [...new Set(data.map(d => d.regione))];
+  const perc = regs.map(reg => {
+    const sub = data.filter(d => d.regione === reg);
+    return Math.round(sub.reduce((s,d) => s+d.perc_nei_tempi,0)/sub.length);
+  });
+  const paired = regs.map((r,i) => ({r, p:perc[i]})).sort((a,b)=>b.p-a.p);
+  const colori = paired.map(x => x.p >= 80 ? '#00875a' : x.p >= 65 ? '#e07b00' : '#cf1919');
+  charts['regioni'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: paired.map(x => x.r),
+      datasets: [{ label: '% Prestazioni nei tempi', data: paired.map(x=>x.p), backgroundColor: colori, borderRadius: 8 }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } },
+      scales: { y: { min: 0, max: 100, ticks: { callback: v=>v+'%' } } } }
+  });
+}
+
+function renderTrend() {
+  destroyChart('trend');
+  destroyChart('proiezione');
+  const labels = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set'];
+  const reg = document.getElementById('selRegione').value;
+  
+  const profiloBase = { 'Sicilia':61,'Lombardia':82,'Lazio':74,'Campania':58,'ALL':72,
+    'Veneto':85,'Toscana':80,'Emilia-Romagna':88,'Puglia':65,'Calabria':48,'Sardegna':62 };
+  const base = profiloBase[reg] || 72;
+  const trend = labels.map((l,i) => Math.min(98, base - 4 + i * 1.2 + (Math.random()-0.5)*2));
+
+  const ctx1 = document.getElementById('chartTrend').getContext('2d');
+  charts['trend'] = new Chart(ctx1, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '% Prestazioni nei tempi', data: trend.map(v=>Math.round(v)),
+          borderColor: '#003087', backgroundColor: 'rgba(0,48,135,0.08)',
+          borderWidth: 2.5, fill: true, tension: 0.4 },
+        { label: 'Soglia min. accettabile (75%)', data: labels.map(()=>75),
+          borderColor: '#e07b00', borderDash: [6,4], borderWidth: 2, pointRadius: 0,
+          backgroundColor: 'transparent' }
+      ]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } },
+      scales: { y: { min: 30, max: 100, ticks: { callback: v=>v+'%' } } } }
+  });
+
+  // Proiezione lineare semplice
+  const ultimi = trend.slice(-3);
+  const pendenza = (ultimi[2]-ultimi[0])/2;
+  const proiezi = [trend[trend.length-1], trend[trend.length-1]+pendenza, trend[trend.length-1]+pendenza*2, trend[trend.length-1]+pendenza*3].map(v=>Math.min(98,Math.max(10,Math.round(v))));
+  
+  const ctx2 = document.getElementById('chartProiezione').getContext('2d');
+  charts['proiezione'] = new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels: ['Set 2025','Ott 2025 (stima)','Nov 2025 (stima)','Dic 2025 (stima)'],
+      datasets: [
+        { label: 'Dati osservati', data: [trend[trend.length-1], null, null, null],
+          borderColor: '#003087', borderWidth: 2.5, pointRadius: 6 },
+        { label: 'Proiezione algoritmica', data: proiezi,
+          borderColor: '#cf1919', borderDash: [6,4], borderWidth: 2,
+          backgroundColor: 'rgba(207,25,25,0.07)', fill: true, tension: 0.3 }
+      ]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } },
+      scales: { y: { min: 30, max: 100, ticks: { callback: v=>v+'%' } } } }
+  });
+}
+
+function renderReport(data) {
+  const reg = document.getElementById('selRegione').value === 'ALL' ? 'Tutte le Regioni' : document.getElementById('selRegione').value;
+  const mese = document.getElementById('selMese').value;
+  const perc = Math.round(data.reduce((s,d) => s+d.perc_nei_tempi,0)/data.length);
+  const tempo = Math.round(data.reduce((s,d) => s+d.tempo_medio_gg,0)/data.length * 10)/10;
+  const critici = data.filter(d => d.perc_nei_tempi < BENCHMARK_MIN[d.classe]).length;
+  const vol = data.reduce((s,d) => s+d.volume,0);
+  
+  const peggiori = [...data].sort((a,b)=>a.perc_nei_tempi-b.perc_nei_tempi).slice(0,3);
+  const migliori = [...data].sort((a,b)=>b.perc_nei_tempi-a.perc_nei_tempi).slice(0,3);
+
+  document.getElementById('reportContent').innerHTML = `
+    <div style="font-family:Georgia,serif;max-width:800px;margin:0 auto;padding:20px;border:1px solid #ccc;border-radius:8px;">
+    <div style="text-align:center;border-bottom:2px solid #003087;padding-bottom:16px;margin-bottom:20px;">
+      <div style="font-size:0.75rem;color:#666;text-transform:uppercase;letter-spacing:1px;">Regione/ASL · Servizio Sanitario Nazionale</div>
+      <h2 style="color:#003087;margin:8px 0;">REPORT MONITORAGGIO LISTE DI ATTESA</h2>
+      <div style="color:#555;font-size:0.85rem;">Periodo di riferimento: <strong>${mese}</strong> · Area: <strong>${reg}</strong></div>
+      <div style="color:#888;font-size:0.75rem;margin-top:4px;">Generato il ${new Date().toLocaleDateString('it-IT')} · ai sensi della Legge 107/2024 e PNGLA 2025-2027</div>
+    </div>
+    
+    <h3 style="color:#003087;font-size:1rem;">1. SINTESI ESECUTIVA</h3>
+    <p>Nel periodo di riferimento, la percentuale complessiva di prestazioni erogate nei tempi previsti dal Piano Nazionale di Governo delle Liste di Attesa è pari al <strong>${perc}%</strong>, con un tempo medio di attesa di <strong>${tempo} giorni</strong> e un volume complessivo di <strong>${vol.toLocaleString('it-IT')} prestazioni</strong>.</p>
+    <p style="margin-top:8px;">Risultano <strong style="color:${critici>10?'#b00000':'#a05a00'}">${critici} prestazioni con performance al di sotto della soglia minima accettabile</strong> definita dal PNGLA.</p>
+    
+    <h3 style="color:#003087;font-size:1rem;margin-top:18px;">2. RISPETTO SOGLIE PER CLASSE DI PRIORITÀ</h3>
+    ${CLASSI.map(c => {
+      const sub = data.filter(d=>d.classe===c);
+      if (!sub.length) return '';
+      const p = Math.round(sub.reduce((s,d)=>s+d.perc_nei_tempi,0)/sub.length);
+      const t = Math.round(sub.reduce((s,d)=>s+d.tempo_medio_gg,0)/sub.length*10)/10;
+      const ok = p >= BENCHMARK_MIN[c];
+      return `<p>• <strong>Classe ${c} (${CLASSI_NOME[c]}):</strong> ${p}% nei tempi · Tempo medio ${t} gg · <span style="color:${ok?'#007a3d':'#b00000'}">${ok?'✅ CONFORME':'⚠️ NON CONFORME'}</span></p>`;
+    }).join('')}
+    
+    <h3 style="color:#003087;font-size:1rem;margin-top:18px;">3. CRITICITÀ PRIORITARIE</h3>
+    ${peggiori.map(d => `<p>🔴 <strong>${d.prestazione}</strong> (Classe ${d.classe}, ${d.regione}): tempo medio ${d.tempo_medio_gg} gg vs soglia ${d.soglia_gg} gg — ${d.perc_nei_tempi}% nei tempi</p>`).join('')}
+    
+    <h3 style="color:#003087;font-size:1rem;margin-top:18px;">4. ECCELLENZE</h3>
+    ${migliori.map(d => `<p>🟢 <strong>${d.prestazione}</strong> (Classe ${d.classe}, ${d.regione}): ${d.perc_nei_tempi}% nei tempi — tempo medio ${d.tempo_medio_gg} gg</p>`).join('')}
+    
+    <h3 style="color:#003087;font-size:1rem;margin-top:18px;">5. AZIONI RACCOMANDATE</h3>
+    <p>${critici > 20 ? '🔴 <strong>Situazione critica.</strong> Si raccomanda attivazione immediata dei percorsi di tutela e verifica delle agende libere nelle strutture private accreditate.' : critici > 10 ? '🟡 <strong>Situazione da monitorare.</strong> Valutare apertura agende serali/festive e reclutamento personale aggiuntivo per le prestazioni critiche.' : '🟢 <strong>Situazione complessivamente soddisfacente.</strong> Mantenere il monitoraggio mensile e consolidare le buone pratiche.'}</p>
+    <p style="margin-top:8px;">• Attivare l'apertura delle grandi apparecchiature diagnostiche per almeno l'80% della capacità produttiva (art. PNGLA 2025-2027)</p>
+    <p>• Verificare l'inclusione di tutte le agende nel sistema CUP regionale</p>
+    <p>• Valutare l'utilizzo del regime ALPI per le classi più critiche</p>
+    
+    <div style="margin-top:24px;padding-top:12px;border-top:1px solid #ccc;font-size:0.72rem;color:#888;text-align:center;">
+      Report generato automaticamente dal sistema di monitoraggio PNLA · Fonte dati: AGENAS · portaletrasparenzaservizisanitari.it<br>
+      Conformità: Legge 107/2024 · PNGLA 2025-2027 · D.M. 17 febbraio 2025
+    </div>
+    </div>
+  `;
+}
+
+// ==================== CSV LOADER ====================
+function loadCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  Papa.parse(file, {
+    header: true, skipEmptyLines: true,
+    complete: (results) => {
+      // Mapping flessibile colonne
+      allData = results.data.map(r => ({
+        regione: r.regione || r.Regione || r.REGIONE || 'N/D',
+        mese: r.mese || r.Mese || r.periodo || '2025-09',
+        prestazione: r.prestazione || r.Prestazione || r.descrizione || 'N/D',
+        classe: (r.classe || r.Classe || r.priorita || 'D').toString().toUpperCase(),
+        soglia_gg: parseInt(r.soglia_gg || r.soglia || 30),
+        tempo_medio_gg: parseFloat(r.tempo_medio_gg || r.tempo_medio || r.giorni || 0),
+        perc_nei_tempi: parseFloat(r.perc_nei_tempi || r.percentuale || r.pct || 0),
+        volume: parseInt(r.volume || r.Volume || r.prestazioni || 0)
+      }));
+      renderAll();
+      alert(`✅ Caricati ${allData.length} record dal file CSV!`);
+    }
+  });
+}
+
+// ==================== EXPORT REPORT ====================
+function exportReport() {
+  const content = document.getElementById('reportContent').innerHTML;
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Report Liste di Attesa</title>
+    <style>body{font-family:Georgia,serif;padding:30px;max-width:900px;margin:auto;font-size:14px;line-height:1.7;}h2,h3{color:#003087;}
+    p{margin-bottom:8px;}</style></head><body>${content}
+    <script>window.onload=()=>window.print();<\/script></body></html>`);
+  win.document.close();
+}
+
+// ==================== TAB NAVIGATION ====================
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['overview','prestazioni','regioni','trend','report'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name === 'trend') renderTrend();
+}
+
+// ==================== INIT ====================
+function loadDemoData() {
+  allData = generateDemoData();
+  renderAll();
+}
+
+window.onload = () => {
+  loadDemoData();
+};
+</script>
+</body>
+</html>
