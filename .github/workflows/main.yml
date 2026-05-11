@@ -1,0 +1,18 @@
+name: Aggiornamento Dati Liste Attesa
+on:
+  schedule:
+    - cron: '0 8 5 * *'
+  workflow_dispatch:
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install requests pandas gspread google-auth openpyxl
+      - run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+      - run: python scraper_agenas.py
+        env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
